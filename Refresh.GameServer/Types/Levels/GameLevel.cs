@@ -85,6 +85,7 @@ public partial class GameLevel : IRealmObject, ISequentialId
 
 #nullable disable
     public IList<GameComment> LevelComments { get; }
+    public IList<GameLevelVersion> LevelVersions { get; }
     
     [Backlink(nameof(FavouriteLevelRelation.Level))]
     public IQueryable<FavouriteLevelRelation> FavouriteRelations { get; }

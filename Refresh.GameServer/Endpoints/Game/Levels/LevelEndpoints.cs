@@ -78,6 +78,26 @@ public class LevelEndpoints : EndpointGroup
     public GameLevelResponse? LevelById(RequestContext context, GameDatabaseContext database, MatchService matchService, GameUser user, int id, IDataStore dataStore, Token token)
         => GameLevelResponse.FromOldWithExtraData(database.GetLevelById(id), database, matchService, user, dataStore, token.TokenGame);
 
+    [GameEndpoint("s/user/{id}/versions", ContentType.Xml)]
+    [NullStatusCode(NotFound)]
+    [MinimumRole(GameUserRole.Restricted)]
+    public SerializedVersionList? LevelVersionById(RequestContext context, GameDatabaseContext database, MatchService matchService, GameUser user, int id, IDataStore dataStore, Token token)
+    {
+        GameLevel? level = database.GetLevelById(id);
+        if (level == null) return null;
+
+        (int skip, int count) = context.GetPageData();
+
+        List<GameLevelVersion> versions = level.LevelVersions
+            .OrderByDescending(c => c.Timestamp)
+            .AsEnumerable()
+            .Skip(skip)
+            .Take(count)
+            .ToList();
+
+        return new SerializedVersionList(versions);
+    }
+
     [GameEndpoint("slotList", ContentType.Xml)]
     [NullStatusCode(BadRequest)]
     [MinimumRole(GameUserRole.Restricted)]

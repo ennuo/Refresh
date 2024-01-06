@@ -78,6 +78,18 @@ public partial class GameDatabaseContext // Levels
             newLevel.TeamPicked = oldLevel.TeamPicked;
             newLevel.GameVersion = oldLevel.GameVersion;
         }
+
+        // Add old level to the version history
+        GameLevelVersion version = new()
+        {
+            Timestamp = oldLevel.UpdateDate,
+            LevelAsset = oldLevel.RootResource,
+            Title = oldLevel.Title,
+            Icon = oldLevel.IconHash,
+            Description = oldLevel.Description
+        };
+
+        this.AddSequentialObject(version, oldLevel.LevelVersions);
         
         // Now newLevel is set up to replace oldLevel.
         // If information is lost here, then that's probably a bug.
