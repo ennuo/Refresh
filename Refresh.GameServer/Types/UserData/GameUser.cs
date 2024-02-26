@@ -3,6 +3,7 @@ using MongoDB.Bson;
 using Realms;
 using Refresh.GameServer.Types.Comments;
 using Bunkum.Core.RateLimit;
+using Refresh.GameServer.Types.Challenges;
 using Refresh.GameServer.Types.Levels;
 using Refresh.GameServer.Types.Photos;
 using Refresh.GameServer.Types.Relations;
@@ -67,6 +68,9 @@ public partial class GameUser : IRealmObject, IRateLimitUser
 
     [Backlink(nameof(GameLevel.Publisher))]
     public IQueryable<GameLevel> PublishedLevels { get; }
+    
+    [Backlink(nameof(GameChallenge.Author))]
+    public IQueryable<GameChallenge> PublishedChallenges { get; }
     
     [Backlink(nameof(GamePhoto.Publisher))]
     public IQueryable<GamePhoto> PhotosByMe { get; }

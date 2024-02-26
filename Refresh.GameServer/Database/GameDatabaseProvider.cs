@@ -8,6 +8,7 @@ using Bunkum.RealmDatabase;
 using Refresh.GameServer.Time;
 using Refresh.GameServer.Types.Activity;
 using Refresh.GameServer.Types.Assets;
+using Refresh.GameServer.Types.Challenges;
 using Refresh.GameServer.Types.Levels.SkillRewards;
 using Refresh.GameServer.Types.Notifications;
 using Refresh.GameServer.Types.Relations;
@@ -32,7 +33,7 @@ public class GameDatabaseProvider : RealmDatabaseProvider<GameDatabaseContext>
         this._time = time;
     }
 
-    protected override ulong SchemaVersion => 110;
+    protected override ulong SchemaVersion => 114;
 
     protected override string Filename => "refreshGameServer.realm";
     
@@ -72,6 +73,9 @@ public class GameDatabaseProvider : RealmDatabaseProvider<GameDatabaseContext>
         typeof(ScreenElements),
         typeof(ScreenRect),
         typeof(Slot),
+        // hub shit
+        typeof(GameChallenge),
+        typeof(GameChallengeCriterion)
     };
 
     public override void Warmup()

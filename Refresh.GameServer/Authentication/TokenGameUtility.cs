@@ -55,7 +55,10 @@ public static class TokenGameUtility
         // missing japan digital?
         
         // Betas/Debug/Prerelease
-        "NPUA70117", // US Private Beta
+        "NPUA70117", // US Private Beta,
+        
+        "BCET70055", // Hub,
+        "NPEA00449",
     };
 
     // PS4 title ids are not here on purpose.
