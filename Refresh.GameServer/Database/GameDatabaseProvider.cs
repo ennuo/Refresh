@@ -33,7 +33,7 @@ public class GameDatabaseProvider : RealmDatabaseProvider<GameDatabaseContext>
         this._time = time;
     }
 
-    protected override ulong SchemaVersion => 114;
+    protected override ulong SchemaVersion => 121;
 
     protected override string Filename => "refreshGameServer.realm";
     
@@ -73,9 +73,10 @@ public class GameDatabaseProvider : RealmDatabaseProvider<GameDatabaseContext>
         typeof(ScreenElements),
         typeof(ScreenRect),
         typeof(Slot),
-        // hub shit
+        // hub specific challenge items
         typeof(GameChallenge),
-        typeof(GameChallengeCriterion)
+        typeof(GameChallengeCriterion),
+        typeof(GameChallengeScore),
     };
 
     public override void Warmup()
@@ -101,7 +102,7 @@ public class GameDatabaseProvider : RealmDatabaseProvider<GameDatabaseContext>
 
         IQueryable<dynamic>? oldUsers = migration.OldRealm.DynamicApi.All("GameUser");
         IQueryable<GameUser>? newUsers = migration.NewRealm.All<GameUser>();
-
+        
         for (int i = 0; i < newUsers.Count(); i++)
         {
             dynamic oldUser = oldUsers.ElementAt(i);

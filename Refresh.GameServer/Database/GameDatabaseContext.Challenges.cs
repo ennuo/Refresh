@@ -1,11 +1,43 @@
 ﻿using JetBrains.Annotations;
 using Refresh.GameServer.Types.Challenges;
+using Refresh.GameServer.Types.Challenges.Serialized;
 using Refresh.GameServer.Types.UserData;
 
 namespace Refresh.GameServer.Database;
 
 public partial class GameDatabaseContext // Challenges
 {
+    public void SubmitChallengeScore(SerializedChallengeAttempt attempt, GameUser user, GameChallenge challenge)
+    {
+        GameChallengeScore? score = this._realm.All<GameChallengeScore>()
+            .FirstOrDefault(s => s.Player == user);
+
+        if (score != null)
+        {
+            this._realm.Write(() =>
+            {
+                score.Ghost = attempt.Ghost;
+                score.Score = attempt.Score;
+            });
+
+            return;
+        }
+        
+        score = new GameChallengeScore
+        {
+            Ghost = attempt.Ghost,
+            Player = user,
+            Score = attempt.Score,
+            Challenge = challenge,
+        };
+
+        this._realm.Write(() =>
+        {
+            this._realm.Add(score);
+            if (attempt.Score == 0) challenge.Score = attempt.Score;
+        });
+    }
+    
     public GameChallenge UploadChallenge(SerializedChallenge challenge, GameUser publisher)
     {
         GameChallenge newChallenge = new()
@@ -25,8 +57,8 @@ public partial class GameDatabaseContext // Challenges
         {
             GameChallengeCriterion newCriterion = new()
             {
-                Name = criterion.Name,
                 Metric = (ChallengeMetric) criterion.Metric,
+                Value = criterion.Value,
             };
 
             newChallenge.Criteria.Add(newCriterion);

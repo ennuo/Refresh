@@ -5,7 +5,7 @@ namespace Refresh.GameServer.Types.Challenges;
 
 public partial class GameChallengeCriterion : IEmbeddedObject
 {
-    public string Name { get; set; } = string.Empty;
+    public long Value { get; set; }
     [Ignored] public ChallengeMetric Metric
     {
         get => (ChallengeMetric)this._Metric;

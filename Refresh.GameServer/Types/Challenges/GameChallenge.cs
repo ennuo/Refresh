@@ -5,6 +5,8 @@ using Refresh.GameServer.Types.UserData;
 
 namespace Refresh.GameServer.Types.Challenges;
 
+#nullable disable
+
 [JsonObject(MemberSerialization.OptOut)]
 public partial class GameChallenge : IRealmObject, ISequentialId
 {
@@ -16,7 +18,7 @@ public partial class GameChallenge : IRealmObject, ISequentialId
     public string LevelType { get; set; }
     public int LevelId { get; set; }
     
-    public float Score { get; set; }
+    public long Score { get; set; }
 
     public int StartCheckpoint { get; set; }
     public int EndCheckpoint { get; set; }
@@ -25,6 +27,9 @@ public partial class GameChallenge : IRealmObject, ISequentialId
     public DateTimeOffset ExpiresAt { get; set; }
     
     public IList<GameChallengeCriterion> Criteria { get; }
+    
+    [Backlink(nameof(GameChallengeScore.Challenge))]
+    public IQueryable<GameChallengeScore> Scores { get; }
     
     [JsonIgnore] public int SequentialId
     {
