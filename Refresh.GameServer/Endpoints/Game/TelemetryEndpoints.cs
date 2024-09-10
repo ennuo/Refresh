@@ -29,8 +29,7 @@ public class TelemetryEndpoints : EndpointGroup
         
         // Probably wouldn't be handling all the parsing here normally,
         // but I'm only using this as a scratchpad really.
-        MemoryStream ms = new(body);
-        CompressedBinaryReaderBE reader = new(ms);
+        MemoryBitStream reader = new(body);
         
         // Common revisions
             // LBP1 01.21 is 0x2 (Start is 0x0 instead of 0x1 in this version?)
@@ -55,7 +54,7 @@ public class TelemetryEndpoints : EndpointGroup
         if (revision >= 0x12)
         {
             Span<byte> levelHash = stackalloc byte[20];
-            ms.ReadExactly(levelHash);
+            reader.ReadExactly(levelHash);
         }
 
         if (revision >= 0x13)
@@ -75,12 +74,15 @@ public class TelemetryEndpoints : EndpointGroup
         // after these revisions, the full SHA1 is serialized.
         bool hasFullHash = revision >= 0x5;
         Span<byte> scratchPadHash = stackalloc byte[20];
+        Span<byte> scratchMacAddress = stackalloc byte[6];
         
         // Many messages have frame timestamps prepended after a certain revision.
         bool hasTimestamps = revision >= 0x1d;
         
         // Keep reading telemetry events until we reach the end of the stream
-        while (ms.Position < ms.Length)
+        // When the data is no longer bit aligned, we might read too much data,
+        // so just check that we have at least 8 bits left.
+        while (reader.BitsRemaining >= 8)
         {
             // Telemetry events don't include size fields, so just have to
             // parse everything, it's kind of rough.
@@ -92,18 +94,15 @@ public class TelemetryEndpoints : EndpointGroup
             
             uint frame = hasTimestamps ? reader.ReadUInt32() : 0;
             
-            // context.Logger.LogDebug(BunkumCategory.Game, $"{evt} from {user.Username}");
+            context.Logger.LogDebug(BunkumCategory.Game, $"{evt} from {user.Username}");
             
             switch (evt)
             {
                 case TelemetryEvent.Start:
                 {
-                    // This doesn't send any data in early versions of LBP1,
-                    // after it just sends some 6 byte packet.
-                    
-                    // TODO: Figure out what this field is meant to represent at some point
+                    // This doesn't send any data in early versions of LBP1
                     if (revision >= 0xd)
-                        ms.Position += 6;
+                        reader.ReadExactly(scratchMacAddress);
                     
                     break;
                 }
@@ -154,7 +153,7 @@ public class TelemetryEndpoints : EndpointGroup
                             uint frameWorn = reader.ReadUInt32();   
                         }
                         
-                        string costume = reader.ReadTerminatedString(); // max size is 32 bytes
+                        string costume = reader.ReadString(); // max size is 32 bytes
                         
                         context.Logger.LogDebug(BunkumCategory.Game, $"{user.Username} has worn {costume}");
                     }
@@ -196,7 +195,7 @@ public class TelemetryEndpoints : EndpointGroup
                         if (revision < 0x15) reader.ReadUInt32(); // Some removed field
                         else b = reader.ReadUInt32(); // Field that replaced it? Both are unsigned integers, but whatev
 
-                        string message = reader.ReadTerminatedString(); // Max size is 40
+                        string message = reader.ReadString(); // Max size is 40
                         
                         context.Logger.LogDebug(BunkumCategory.Game, $"{user.Username} has game message [a]={a}, [b]={b}, [msg]={message}");
                     }
@@ -210,9 +209,9 @@ public class TelemetryEndpoints : EndpointGroup
                     {
                         uint mode = reader.ReadUInt32();
                         uint subMode = reader.ReadUInt32();
-                        string state = revision >= 0x1d ? reader.ReadTerminatedString() : string.Empty; // Max size is 256 characters
+                        string owner = revision >= 0x1d ? reader.ReadString() : string.Empty; // Max size is 256 characters
                         
-                        context.Logger.LogDebug(BunkumCategory.Game, $"{user.Username} has poppet state [mode]={mode}, [submode]={subMode}, [state]={state}");
+                        context.Logger.LogDebug(BunkumCategory.Game, $"{user.Username} has poppet state [mode]={mode}, [submode]={subMode}, [state]={owner}");
                     }
                     
                     break;
@@ -223,7 +222,7 @@ public class TelemetryEndpoints : EndpointGroup
                     if (revision >= 0x14)
                     {
                         // This is just the name of the Pod Computer state returned from PodComputerState::GetName 
-                        string state = reader.ReadTerminatedString(); // Max string length is 512
+                        string state = reader.ReadString(); // Max string length is 512
                     
                         context.Logger.LogDebug(BunkumCategory.Game, $"{user.Username} visited pod computer state '{state}' at {frame}");   
                     }
@@ -250,6 +249,50 @@ public class TelemetryEndpoints : EndpointGroup
                     break;
                 }
 
+                case TelemetryEvent.UserExperienceMetrics:
+                {
+                    if (revision < 0x17) break;
+                    
+                    // These values are probably not accurate in terms of names,
+                    // well they could be close, since it seems they're probably(?)
+                    // the same as the LBP3 JSON versions, but who knows, it at least
+                    // is the correct data size.
+                    
+                    float curMspf = reader.ReadSingle();
+                    float avgMspf = reader.ReadSingle();
+                    float hiMspf = reader.ReadSingle();
+                    uint predictApplied = reader.ReadUInt32();
+                    uint predictDesired = reader.ReadUInt32();
+                    bool isHost = reader.ReadBit();
+                    bool isCreate = reader.ReadBit();
+                    uint numPlayers = reader.ReadUInt32();
+                    uint numPS3s = reader.ReadUInt32();
+                    float avgRttHost = reader.ReadSingle();
+                    float bwUsage = reader.ReadSingle();
+                    float worstPing = reader.ReadSingle();
+                    float worstBw = reader.ReadSingle();
+                    float worstPl = reader.ReadSingle();
+                    uint worstPlayers = reader.ReadUInt32();
+                    float httpBwUp = reader.ReadSingle();
+                    float httpBwDown = reader.ReadSingle();
+                    uint _frame = reader.ReadUInt32();
+                    uint lastMgjFrame = reader.ReadUInt32();
+
+                    for (int i = 0; i < numPlayers; ++i)
+                    {
+                        uint netStatFrame = reader.ReadUInt32();
+                        uint player = reader.ReadUInt32();
+                        bool isLocal = reader.ReadBit();
+                        uint availBandwidth = reader.ReadUInt32();
+                        uint availRnpBandwidth = reader.ReadUInt32();
+                        float availGameBandwidth = reader.ReadSingle();
+                        uint recentTotalBandwidthUsed = reader.ReadUInt32();
+                        float timeBetweenSends = reader.ReadSingle();
+                    }
+                    
+                    break;
+                }
+
                 case TelemetryEvent.InventoryItemClick:
                 {
                     if (revision < 0x19) break;
@@ -261,7 +304,7 @@ public class TelemetryEndpoints : EndpointGroup
                         reader.ReadUInt32();
                     uint numHashes = reader.ReadUInt32();
                     for (int i = 0; i < numHashes; ++i)
-                        ms.ReadExactly(scratchPadHash);
+                        reader.ReadExactly(scratchPadHash);
                     
                     break;
                 }
@@ -278,7 +321,7 @@ public class TelemetryEndpoints : EndpointGroup
                     break;
                 }
 
-                case TelemetryEvent.Is50hzTv:
+                case TelemetryEvent.Is50HzTv:
                 case TelemetryEvent.IsStandardDefTv:
                 case TelemetryEvent.UsingImportedLbp1Profile:
                 {
@@ -301,7 +344,7 @@ public class TelemetryEndpoints : EndpointGroup
                 case TelemetryEvent.ModalOverlayState:
                 {
                     // This is just the name of the modal overlay state returned from ModalOverlayState::GetName
-                    string state = reader.ReadTerminatedString();
+                    string state = reader.ReadString();
                     
                     context.Logger.LogDebug(BunkumCategory.Game, $"{user.Username} visited modal overlay state '{state}' at {frame}");
                     

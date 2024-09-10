@@ -43,7 +43,7 @@ public enum TelemetryEvent : uint
     OffscreenDeathPosition,
     InventoryItemClick,
     OpenPsid,
-    Is50hzTv,
+    Is50HzTv,
     IsStandardDefTv,
     UsingImportedLbp1Profile,
     MergeProfile,
