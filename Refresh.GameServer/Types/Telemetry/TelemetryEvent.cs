@@ -1,4 +1,4 @@
-﻿namespace Refresh.GameServer.Types;
+﻿namespace Refresh.GameServer.Types.Telemetry;
 
 public enum TelemetryEvent : uint
 {

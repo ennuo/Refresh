@@ -1,16 +1,10 @@
 ﻿using Bunkum.Core;
 using Bunkum.Core.Endpoints;
 using Bunkum.Core.Responses;
-using Bunkum.Listener.Protocol;
 using Bunkum.Protocols.Http;
-using Refresh.GameServer.Configuration;
-using Refresh.GameServer.Database;
 using Refresh.GameServer.Importing;
-using Refresh.GameServer.Time;
-using Refresh.GameServer.Types;
-using Refresh.GameServer.Types.Challenges;
-using Refresh.GameServer.Types.Levels;
 using Refresh.GameServer.Types.Roles;
+using Refresh.GameServer.Types.Telemetry;
 using Refresh.GameServer.Types.UserData;
 
 namespace Refresh.GameServer.Endpoints.Game;
@@ -47,20 +41,20 @@ public class TelemetryEndpoints : EndpointGroup
         // LBP2 has telemetry messages up until E_TELEMETRY_DCDS_ACTION
         // LBP3 has whatever is after, I'm honestly not bothering to go through them right now.
         // LBP Vita has telemetry messages up until E_TELEMETRY_GAME_PROGRESSION
-        
+
+        TelemetryHeader header = new();
         ushort revision = reader.ReadUInt16();
-        uint hashedPlayerId = reader.ReadUInt32();
+
+        header.Revision = revision;
+        header.HashedPlayerId = reader.ReadUInt32();
         
         if (revision >= 0x12)
-        {
-            Span<byte> levelHash = stackalloc byte[20];
-            reader.ReadExactly(levelHash);
-        }
-
+            reader.ReadExactly(header.LevelHash);
+        
         if (revision >= 0x13)
         {
-            uint slotType = reader.ReadUInt32();
-            uint slotNumber = reader.ReadUInt32();
+            header.SlotType = reader.ReadUInt32();
+            header.SlotNumber = reader.ReadUInt32();
         }
 
         // All position messages have a CHash serialized before the
@@ -73,8 +67,6 @@ public class TelemetryEndpoints : EndpointGroup
         // Between revisions 1 and 5, only the first 4 bytes of hashes were serialized
         // after these revisions, the full SHA1 is serialized.
         bool hasFullHash = revision >= 0x5;
-        Span<byte> scratchPadHash = stackalloc byte[20];
-        Span<byte> scratchMacAddress = stackalloc byte[6];
         
         // Many messages have frame timestamps prepended after a certain revision.
         bool hasTimestamps = revision >= 0x1d;
@@ -102,7 +94,12 @@ public class TelemetryEndpoints : EndpointGroup
                 {
                     // This doesn't send any data in early versions of LBP1
                     if (revision >= 0xd)
-                        reader.ReadExactly(scratchMacAddress);
+                    {
+                        InlinePhysicalAddress addr = new();
+                        reader.ReadExactly(addr);
+                        
+                        context.Logger.LogDebug(BunkumCategory.Game, $"{user.Username} has started sending telemetry data. MAC: {Convert.ToHexString(addr)}");
+                    }
                     
                     break;
                 }
@@ -175,12 +172,20 @@ public class TelemetryEndpoints : EndpointGroup
                 case TelemetryEvent.AiDeathPosition:
                 case TelemetryEvent.OffscreenDeathPosition:
                 {
-                    float x = reader.ReadSingle();
-                    float y = reader.ReadSingle();
-                    uint a = reader.ReadUInt32();
-                    uint b = revision >= 0x19 ? reader.ReadUInt32() : 0x0;
+                    TelemetryPosition pos = new()
+                    {
+                        X = reader.ReadSingle(),
+                        Y = reader.ReadSingle(),
+                        Layer = reader.ReadUInt32(),
+                    };
                     
-                    context.Logger.LogDebug(BunkumCategory.Game, $"{user.Username} - {evt} - <{x}, {y}> ({a}, {b})");
+                    // They already added the frame to most telemetry messages,
+                    // couldn't they have removed these duplicates?
+                    // Seems to always be the same as the prior frame value.
+                    if (revision >= 0x19)
+                        pos.Frame = reader.ReadUInt32();
+                    
+                    context.Logger.LogDebug(BunkumCategory.Game, $"{user.Username} - {evt} - <{pos.X}, {pos.Y}, {pos.Layer}> @ {pos.Frame}");
                     
                     break;
                 }
@@ -189,15 +194,22 @@ public class TelemetryEndpoints : EndpointGroup
                 {
                     if (revision >= 0x14)
                     {
-                        uint a = reader.ReadUInt32(); // type?
-
-                        uint b = 0; // lams?
-                        if (revision < 0x15) reader.ReadUInt32(); // Some removed field
-                        else b = reader.ReadUInt32(); // Field that replaced it? Both are unsigned integers, but whatev
-
-                        string message = reader.ReadString(); // Max size is 40
+                        TelemetryGameMessage msg = new()
+                        {
+                            // Probably important to note that the types get moved around depending on the version of the game,
+                            // for example EGMT_ALERT in LBP2 is 19, while in LBP3, it's 20
+                            Type = reader.ReadUInt32(),
+                        };
                         
-                        context.Logger.LogDebug(BunkumCategory.Game, $"{user.Username} has game message [a]={a}, [b]={b}, [msg]={message}");
+                        // Some removed value, no builds seem to have this revision,
+                        // so it's probably not important to consider.
+                        if (revision < 0x15) reader.ReadUInt32();
+                        else msg.Key = reader.ReadUInt32();
+
+                        // This message has a max size of 40 bytes including the null terminator.
+                        msg.Message = reader.ReadString();
+                        
+                        context.Logger.LogDebug(BunkumCategory.Game, $"{user.Username} has game message [type]={msg.Type}, [key]={msg.Key}, [text]={msg.Message}");
                     }
                     
                     break;
@@ -207,11 +219,18 @@ public class TelemetryEndpoints : EndpointGroup
                 {
                     if (revision >= 0x14)
                     {
-                        uint mode = reader.ReadUInt32();
-                        uint subMode = reader.ReadUInt32();
-                        string owner = revision >= 0x1d ? reader.ReadString() : string.Empty; // Max size is 256 characters
+                        TelemetryPoppetState poppet = new()
+                        {
+                            Mode = reader.ReadUInt32(),
+                            SubMode = reader.ReadUInt32(),
+                        };
+
+                        // Max size is 256 characters for whatever reason,
+                        // might contain other data in certain sub modes?
+                        if (revision >= 0x1d)
+                            poppet.Player = reader.ReadString();
                         
-                        context.Logger.LogDebug(BunkumCategory.Game, $"{user.Username} has poppet state [mode]={mode}, [submode]={subMode}, [state]={owner}");
+                        context.Logger.LogDebug(BunkumCategory.Game, $"{user.Username} has poppet state [mode]={(PoppetMode)poppet.Mode}, [submode]={(PoppetSubMode)poppet.SubMode}, [player]={poppet.Player}");
                     }
                     
                     break;
@@ -257,37 +276,44 @@ public class TelemetryEndpoints : EndpointGroup
                     // well they could be close, since it seems they're probably(?)
                     // the same as the LBP3 JSON versions, but who knows, it at least
                     // is the correct data size.
-                    
-                    float curMspf = reader.ReadSingle();
-                    float avgMspf = reader.ReadSingle();
-                    float hiMspf = reader.ReadSingle();
-                    uint predictApplied = reader.ReadUInt32();
-                    uint predictDesired = reader.ReadUInt32();
-                    bool isHost = reader.ReadBit();
-                    bool isCreate = reader.ReadBit();
-                    uint numPlayers = reader.ReadUInt32();
-                    uint numPS3s = reader.ReadUInt32();
-                    float avgRttHost = reader.ReadSingle();
-                    float bwUsage = reader.ReadSingle();
-                    float worstPing = reader.ReadSingle();
-                    float worstBw = reader.ReadSingle();
-                    float worstPl = reader.ReadSingle();
-                    uint worstPlayers = reader.ReadUInt32();
-                    float httpBwUp = reader.ReadSingle();
-                    float httpBwDown = reader.ReadSingle();
-                    uint _frame = reader.ReadUInt32();
-                    uint lastMgjFrame = reader.ReadUInt32();
-
-                    for (int i = 0; i < numPlayers; ++i)
+                    TelemetryUserExperienceMetrics metrics = new()
                     {
-                        uint netStatFrame = reader.ReadUInt32();
-                        uint player = reader.ReadUInt32();
-                        bool isLocal = reader.ReadBit();
-                        uint availBandwidth = reader.ReadUInt32();
-                        uint availRnpBandwidth = reader.ReadUInt32();
-                        float availGameBandwidth = reader.ReadSingle();
-                        uint recentTotalBandwidthUsed = reader.ReadUInt32();
-                        float timeBetweenSends = reader.ReadSingle();
+                        CurrentMspf = reader.ReadSingle(),
+                        AverageMspf = reader.ReadSingle(),
+                        HighMspf = reader.ReadSingle(),
+                        PredictApplied = reader.ReadUInt32(),
+                        PredictDesired = reader.ReadUInt32(),
+                        IsHost = reader.ReadBit(),
+                        IsCreate = reader.ReadBit(),
+                        NumPlayers = reader.ReadUInt32(),
+                        NumPs3s = reader.ReadUInt32(),
+                        AverageRttHost = reader.ReadSingle(),
+                        BandwidthUsage = reader.ReadSingle(),
+                        WorstPing = reader.ReadSingle(),
+                        WorstBandwidth = reader.ReadSingle(),
+                        WorstPacketLoss = reader.ReadSingle(),
+                        WorstPlayers = reader.ReadUInt32(),
+                        HttpBandwidthUp = reader.ReadSingle(),
+                        HttpBandwidthDown = reader.ReadSingle(),
+                        Frame = reader.ReadUInt32(),
+                        LastMgjFrame = reader.ReadUInt32(),
+                    };
+                    
+                    for (int i = 0; i < metrics.NumPlayers; ++i)
+                    {
+                        TelemetryPlayerNetStats stats = new()
+                        {
+                            Frame = reader.ReadUInt32(),
+                            Player = reader.ReadUInt32(),
+                            IsLocal = reader.ReadBit(),
+                            AvailableBandwidth = reader.ReadUInt32(),
+                            AvailableRnpBandwidth = reader.ReadUInt32(),
+                            AvailableGameBandwidth = reader.ReadSingle(),
+                            RecentTotalBandwidthUsed = reader.ReadUInt32(),
+                            TimeBetweenSends = reader.ReadSingle(),
+                        };
+                        
+                        metrics.PlayerNetStats.Add(stats);
                     }
                     
                     break;
@@ -296,15 +322,23 @@ public class TelemetryEndpoints : EndpointGroup
                 case TelemetryEvent.InventoryItemClick:
                 {
                     if (revision < 0x19) break;
-                    
-                    uint action = reader.ReadUInt32();
-                    uint type = reader.ReadUInt32();
+
+                    TelemetryInventoryItem item = new()
+                    {
+                        Action = reader.ReadUInt32(),
+                        Type = reader.ReadUInt32(),
+                    };
+
                     uint numGuids = reader.ReadUInt32();
                     for (int i = 0; i < numGuids; ++i)
-                        reader.ReadUInt32();
+                        item.Guids.Add(reader.ReadUInt32());
                     uint numHashes = reader.ReadUInt32();
                     for (int i = 0; i < numHashes; ++i)
-                        reader.ReadExactly(scratchPadHash);
+                    {
+                        InlineHash hash = new();
+                        reader.ReadExactly(hash);
+                        item.Hashes.Add(hash);
+                    }
                     
                     break;
                 }
@@ -313,9 +347,11 @@ public class TelemetryEndpoints : EndpointGroup
                 {
                     if (revision >= 0x19)
                     {
-                        // High and low bits of the user's OpenPSID
-                        reader.ReadUInt64();
-                        reader.ReadUInt64();
+                        OpenPsid _ = new()
+                        {
+                            Low = reader.ReadUInt64(),
+                            High = reader.ReadUInt64(),
+                        };
                     }
                     
                     break;
